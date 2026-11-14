@@ -1,0 +1,1383 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-[#07090e] text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VocalPrompter Studio</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- LameJS CDN para codificación MP3 nativa en el navegador -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      overscroll-behavior-y: none;
+    }
+    .font-mono-code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Ocultar barra de scroll para teleprompter limpio */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    /* Estilos de máscaras de lectura */
+    .prompter-mask {
+      mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%);
+    }
+    /* Efectos de pulso y animación de grabación */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .recording-ring {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="h-full w-full overflow-hidden flex flex-col bg-[#07090e] selection:bg-indigo-500/40 selection:text-white">
+
+  <!-- ================= TOP BAR ================= -->
+  <header class="h-14 border-b border-white/10 bg-[#0c1017]/90 backdrop-blur px-4 flex items-center justify-between shrink-0 z-30">
+    <!-- Brand & Project Name -->
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-rose-500 flex items-center justify-center shadow-lg shadow-indigo-600/30">
+        <i data-lucide="mic" class="w-4 h-4 text-white"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="font-bold tracking-tight text-sm text-white">Vocal<span class="text-indigo-400">Prompter</span></span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">PRO</span>
+        </div>
+        <p class="text-[11px] text-slate-400 font-mono-code truncate max-w-[180px] sm:max-w-xs" id="headerProjectName">proyecto-sin-titulo</p>
+      </div>
+    </div>
+
+    <!-- Timer & Audio Status -->
+    <div class="flex items-center gap-3">
+      <!-- Live VuMeter & Audio Status -->
+      <div class="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/10 text-xs font-mono-code">
+        <div class="w-2 h-2 rounded-full bg-slate-500" id="micStatusDot"></div>
+        <span class="text-slate-400 text-[11px]" id="micStatusText">Mic en espera</span>
+        <!-- Canvas Vumeter -->
+        <canvas id="vuMeterCanvas" width="64" height="12" class="rounded bg-black/50 ml-1"></canvas>
+      </div>
+
+      <!-- Filtro Aire Acondicionado (90Hz High-Pass) Toggle -->
+      <button id="btnToggleAcFilter" title="Filtro Pasa-Altos 90Hz (Elimina zumbido grave de aire acondicionado)" class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-mono-code hover:bg-emerald-500/25 transition-all">
+        <i data-lucide="wind" class="w-3.5 h-3.5"></i>
+        <span>Filtro Aire 90Hz: ON</span>
+      </button>
+
+      <!-- Recording Badge / Clock -->
+      <div class="flex items-center gap-2 px-3 py-1 rounded-lg bg-black/40 border border-white/10 font-mono-code text-xs">
+        <span class="w-2.5 h-2.5 rounded-full bg-slate-600" id="recBadgeDot"></span>
+        <span id="recordingTimer" class="font-semibold text-slate-300">00:00:00</span>
+      </div>
+
+      <!-- Flip Mirror Mode Button (útil para teleprompters de cristal físico) -->
+      <button id="btnMirror" title="Invertir horizontalmente para espejo" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
+        <i data-lucide="flip-horizontal" class="w-4 h-4"></i>
+      </button>
+
+      <!-- Toggle Help / Settings -->
+      <button id="btnShortcuts" title="Atajos de Teclado" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
+        <i data-lucide="keyboard" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= MAIN WORKSPACE ================= -->
+  <main class="flex-1 flex overflow-hidden relative">
+
+    <!-- LEFT DRAWER / SCRIPT & CONFIG PANEL -->
+    <aside id="editorPanel" class="w-80 sm:w-96 border-r border-white/10 bg-[#090d14] flex flex-col shrink-0 transition-all duration-300 z-20 absolute lg:relative inset-y-0 left-0 shadow-2xl lg:shadow-none overflow-y-auto no-scrollbar">
+      
+      <!-- Panel Header -->
+      <div class="p-3.5 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#090d14]/95 backdrop-blur z-10">
+        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+          <i data-lucide="file-text" class="w-4 h-4 text-indigo-400"></i>
+          <span>Guion & Configuración</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button id="btnOpenBigEditor" title="Abrir editor en pantalla completa" class="p-1.5 text-slate-400 hover:text-indigo-400 rounded hover:bg-white/5 transition-colors">
+            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+          </button>
+          <button id="btnClosePanel" class="lg:hidden p-1.5 text-slate-400 hover:text-white">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Script Settings & Stats -->
+      <div class="p-3.5 space-y-3 border-b border-white/10 bg-white/[0.01]">
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Nombre del Proyecto / Guion</label>
+          <input type="text" id="inputProjectTitle" value="guion_episodio_01" class="w-full px-2.5 py-1.5 bg-black/50 border border-white/10 rounded-lg text-xs font-mono-code focus:outline-none focus:border-indigo-500 text-slate-200">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-center font-mono-code text-xs">
+          <div class="bg-black/30 border border-white/5 p-1.5 rounded-lg">
+            <span class="text-[9px] text-slate-500 block uppercase">Palabras</span>
+            <span id="statWordCount" class="font-bold text-slate-200 text-sm">0</span>
+          </div>
+          <div class="bg-black/30 border border-white/5 p-1.5 rounded-lg">
+            <span class="text-[9px] text-slate-500 block uppercase">Duración est.</span>
+            <span id="statEstTime" class="font-bold text-indigo-400 text-sm">0 min</span>
+          </div>
+        </div>
+
+        <!-- Selector de Formato de Salida (MP3 / WAV) -->
+        <div>
+          <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Formato de Exportación</label>
+          <div class="grid grid-cols-2 gap-1.5 p-1 bg-black/50 border border-white/10 rounded-lg font-mono-code text-xs">
+            <button type="button" id="btnFormatMp3" class="py-1.5 px-2 rounded-md font-bold bg-indigo-600 text-white shadow transition-all flex flex-col items-center">
+              <span>.MP3</span>
+              <span class="text-[9px] font-normal opacity-80">192kbps · ~25MB</span>
+            </button>
+            <button type="button" id="btnFormatWav" class="py-1.5 px-2 rounded-md font-medium text-slate-400 hover:text-white transition-all flex flex-col items-center">
+              <span>.WAV</span>
+              <span class="text-[9px] font-normal opacity-60">PCM 16-bit · Estudio</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Ganancia de Micrófono & Procesamiento DSP -->
+        <div class="bg-black/30 border border-white/5 p-2 rounded-lg space-y-1.5">
+          <div class="flex items-center justify-between text-[10px] font-mono-code">
+            <span class="text-slate-400 uppercase font-semibold flex items-center gap-1">
+              <i data-lucide="sliders" class="w-3 h-3 text-indigo-400"></i> Ganancia Mic (DSP)
+            </span>
+            <span id="micGainDisplay" class="text-indigo-300 font-bold">1.2x</span>
+          </div>
+          <input type="range" id="sliderMicGain" min="0.8" max="2.2" step="0.1" value="1.2" class="w-full accent-indigo-500 cursor-pointer h-1.5 bg-white/10 rounded-lg">
+        </div>
+
+        <!-- Carpeta de Descargas / File System Access -->
+        <div class="pt-0.5">
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="folder-cog" class="w-3.5 h-3.5 text-emerald-400"></i>
+              <span>Destino Guardado</span>
+            </label>
+            <span id="folderBadge" class="text-[10px] text-slate-500 font-mono">Descarga Tradicional</span>
+          </div>
+          <button id="btnSelectFolder" class="w-full py-1.5 px-2.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg flex items-center justify-center gap-1.5 transition-all">
+            <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i>
+            <span id="btnSelectFolderText" class="truncate">Definir carpeta de guardado automático</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Guion Input Textarea -->
+      <div class="p-3.5 flex flex-col flex-1 min-h-[280px]">
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span>Pegar / Editar Guion</span>
+          </label>
+          <div class="flex items-center gap-2">
+            <!-- Botón pegar directo portapapeles -->
+            <button id="btnPasteClipboard" title="Pegar del portapapeles" class="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
+              <i data-lucide="clipboard" class="w-3 h-3"></i> Pegar
+            </button>
+            <!-- Subir archivo .txt / .md -->
+            <label for="fileScriptInput" title="Cargar archivo .txt o .md" class="text-[10px] text-slate-400 hover:text-white font-medium cursor-pointer flex items-center gap-1 bg-white/5 px-1.5 py-0.5 rounded border border-white/10">
+              <i data-lucide="upload" class="w-3 h-3"></i> Abrir
+              <input type="file" id="fileScriptInput" accept=".txt,.md,.text" class="hidden">
+            </label>
+            <button id="btnClearScript" class="text-[10px] text-rose-400 hover:text-rose-300 font-normal underline">Limpiar</button>
+          </div>
+        </div>
+        <p class="text-[10px] text-slate-500 font-mono-code mb-2">Tip: Usa <span class="text-amber-400">//</span> o <span class="text-amber-400">[pausa]</span> para respirar y <span class="text-cyan-400">*palabra*</span> para énfasis.</p>
+
+        <textarea id="scriptInput" rows="11" class="w-full flex-1 min-h-[200px] p-3 bg-black/60 border border-white/15 rounded-xl text-xs sm:text-sm leading-relaxed text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-sans" placeholder="Escribe o pega aquí tu guion...&#10;&#10;Usa // para marcar pausas de respiración y *asteriscos* para resaltar énfasis."></textarea>
+      </div>
+          <button id="btnSelectFolder" class="w-full py-1.5 px-2.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg flex items-center justify-center gap-1.5 transition-all">
+            <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i>
+            <span id="btnSelectFolderText" class="truncate">Definir carpeta de guardado automático</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Guion Input Textarea -->
+      <div class="p-3.5 flex flex-col flex-1 min-h-[300px]">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span>Pegar / Editar Guion</span>
+          </label>
+          <div class="flex items-center gap-2">
+            <!-- Botón pegar directo portapapeles -->
+            <button id="btnPasteClipboard" title="Pegar del portapapeles" class="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
+              <i data-lucide="clipboard" class="w-3 h-3"></i> Pegar
+            </button>
+            <!-- Subir archivo .txt / .md -->
+            <label for="fileScriptInput" title="Cargar archivo .txt o .md" class="text-[10px] text-slate-400 hover:text-white font-medium cursor-pointer flex items-center gap-1 bg-white/5 px-1.5 py-0.5 rounded border border-white/10">
+              <i data-lucide="upload" class="w-3 h-3"></i> Abrir
+              <input type="file" id="fileScriptInput" accept=".txt,.md,.text" class="hidden">
+            </label>
+            <button id="btnClearScript" class="text-[10px] text-rose-400 hover:text-rose-300 font-normal underline">Limpiar</button>
+          </div>
+        </div>
+
+        <textarea id="scriptInput" rows="12" class="w-full flex-1 min-h-[220px] p-3 bg-black/60 border border-white/15 rounded-xl text-xs sm:text-sm leading-relaxed text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-sans" placeholder="Escribe o pega aquí tu guion...&#10;&#10;Soporta hasta 20 minutos de lectura fluida."></textarea>
+      </div>
+
+      <!-- Quick sample load -->
+      <div class="p-3 border-t border-white/10 bg-black/20 flex gap-2 shrink-0">
+        <button id="btnLoadSample" class="w-full py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 text-xs rounded-lg border border-white/10 transition-colors">
+          Cargar Guion de Demostración (3 min)
+        </button>
+      </div>
+    </aside>
+
+    <!-- CENTER / PROMPTER VIEWPORT -->
+    <section class="flex-1 flex flex-col bg-[#05070b] relative overflow-hidden">
+      
+      <!-- Prompter Stage Top Gradient & Reading Anchor Eye-Line Indicator -->
+      <div class="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#05070b] via-[#05070b]/90 to-transparent pointer-events-none z-10"></div>
+      
+      <!-- Focal Reading Eye-Level Bar -->
+      <div class="absolute inset-x-0 top-[28%] pointer-events-none z-10 flex items-center justify-between px-6 opacity-80" id="readingGuideBar">
+        <div class="flex items-center gap-1.5 text-indigo-400 text-xs font-mono font-bold tracking-widest bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-500/30 backdrop-blur">
+          <i data-lucide="chevron-right" class="w-3.5 h-3.5 animate-pulse"></i>
+          <span>LÍNEA DE MIRADA (CÁMARA / MIC)</span>
+        </div>
+        <div class="h-[1px] flex-1 bg-gradient-to-r from-indigo-500/40 via-indigo-500/20 to-transparent mx-4"></div>
+      </div>
+
+      <div class="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-[#05070b] via-[#05070b]/80 to-transparent pointer-events-none z-10"></div>
+
+      <!-- SCROLL CONTAINER -->
+      <div id="prompterContainer" class="flex-1 overflow-y-auto no-scrollbar prompter-mask px-8 md:px-20 lg:px-32 xl:px-44 transition-transform duration-300">
+        
+        <!-- Top Spacer so first paragraph starts aligned to guide bar -->
+        <div class="h-[28vh]"></div>
+
+        <!-- Prompter Text Content -->
+        <div id="prompterContent" class="space-y-8 leading-relaxed font-bold transition-all duration-200">
+          <!-- Rendered dynamically -->
+        </div>
+
+        <!-- Bottom Spacer -->
+        <div class="h-[70vh] flex flex-col items-center justify-center text-slate-600 font-mono-code text-sm">
+          <div class="w-12 h-1 bg-white/10 rounded-full mb-3"></div>
+          <span>FIN DEL GUION</span>
+        </div>
+      </div>
+
+      <!-- Countdown Overlay -->
+      <div id="countdownOverlay" class="absolute inset-0 bg-[#05070b]/90 backdrop-blur-md flex flex-col items-center justify-center z-40 hidden">
+        <span class="text-indigo-400 text-xs font-mono uppercase tracking-[0.3em] mb-4">Iniciando Grabación en</span>
+        <div id="countdownNumber" class="text-9xl font-extrabold text-white font-mono scale-110 transition-transform">3</div>
+        <p class="text-slate-400 text-xs mt-6 font-mono">Toma aire y mira fijamente al objetivo</p>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ================= CONTROL HUD (BOTTOM BAR) ================= -->
+  <footer class="border-t border-white/10 bg-[#0c1017]/95 backdrop-blur-md px-4 py-3 z-30 shrink-0">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Left Controls: Toggle Sidebar & Font Size -->
+      <div class="flex items-center gap-3">
+        <button id="btnToggleDrawer" class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition-colors flex items-center gap-2 text-xs font-medium">
+          <i data-lucide="panel-left-open" class="w-4 h-4"></i>
+          <span class="hidden sm:inline">Editor Guion</span>
+        </button>
+
+        <!-- Typography Size Slider -->
+        <div class="flex items-center gap-2 bg-black/40 border border-white/10 px-3 py-1.5 rounded-xl">
+          <i data-lucide="type" class="w-3.5 h-3.5 text-slate-400"></i>
+          <input type="range" id="sliderFontSize" min="28" max="72" value="44" class="w-20 md:w-28 accent-indigo-500 cursor-pointer">
+          <span id="fontSizeDisplay" class="font-mono-code text-xs text-slate-300 w-8 text-right">44px</span>
+        </div>
+      </div>
+
+      <!-- Center Master Controls: Play/Record/Stop -->
+      <div class="flex items-center gap-3">
+        
+        <!-- Rewind to Top -->
+        <button id="btnResetPosition" title="Reiniciar al inicio (Tecla R)" class="p-3 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition-colors">
+          <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Main Run / Record Button -->
+        <button id="btnMasterAction" class="px-6 py-3 rounded-full font-bold text-sm flex items-center gap-2.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-rose-600 hover:from-indigo-500 hover:to-rose-500 text-white shadow-lg shadow-indigo-600/30 hover:scale-105 active:scale-95 transition-all">
+          <i data-lucide="play" class="w-4 h-4 fill-current"></i>
+          <span id="btnMasterText">GRABAR & PROMPT</span>
+        </button>
+
+        <!-- Pause / Resume -->
+        <button id="btnPause" disabled class="p-3 rounded-full bg-white/5 text-slate-500 border border-white/5 cursor-not-allowed transition-colors" title="Pausar / Reanudar (Espacio)">
+          <i data-lucide="pause" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Stop & Save Recording -->
+        <button id="btnStopRecord" disabled class="px-4 py-2.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 font-medium text-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all" title="Detener y Exportar">
+          <i data-lucide="square" class="w-3.5 h-3.5 fill-current"></i>
+          <span>FINALIZAR TOMA</span>
+        </button>
+      </div>
+
+      <!-- Right Controls: Speed WPM Slider & Guide Line Toggle -->
+      <div class="flex items-center gap-3">
+        <!-- Speed in WPM -->
+        <div class="flex items-center gap-2 bg-black/40 border border-white/10 px-3 py-1.5 rounded-xl">
+          <i data-lucide="gauge" class="w-3.5 h-3.5 text-indigo-400"></i>
+          <div class="flex flex-col">
+            <div class="flex justify-between items-center text-[10px] font-mono text-slate-400 mb-0.5">
+              <span>VELOCIDAD</span>
+              <span id="wpmDisplay" class="font-bold text-indigo-300">140 WPM</span>
+            </div>
+            <input type="range" id="sliderSpeed" min="60" max="280" step="5" value="140" class="w-24 md:w-36 accent-indigo-500 cursor-pointer">
+          </div>
+        </div>
+
+        <!-- Toggle Reading Guide Line -->
+        <button id="btnToggleGuide" class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition-colors" title="Mostrar/Ocultar Línea Guía">
+          <i data-lucide="eye" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+    </div>
+  </footer>
+
+  <!-- ================= MODAL: SHORTCUTS ================= -->
+  <div id="shortcutsModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-[#0f1420] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <i data-lucide="keyboard" class="w-4 h-4 text-indigo-400"></i>
+          Atajos de Teclado & Operación
+        </h3>
+        <button id="btnCloseModal" class="p-1 text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="space-y-3 py-4 text-xs font-mono">
+        <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+          <span class="text-slate-400">Espacio</span>
+          <span class="px-2 py-0.5 bg-white/10 text-white rounded">Play / Pausa Scroll</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+          <span class="text-slate-400">Flecha Arriba (↑)</span>
+          <span class="px-2 py-0.5 bg-white/10 text-white rounded">+ Velocidad (+5 WPM)</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+          <span class="text-slate-400">Flecha Abajo (↓)</span>
+          <span class="px-2 py-0.5 bg-white/10 text-white rounded">- Velocidad (-5 WPM)</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+          <span class="text-slate-400">R</span>
+          <span class="px-2 py-0.5 bg-white/10 text-white rounded">Reiniciar al inicio</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+          <span class="text-slate-400">M</span>
+          <span class="px-2 py-0.5 bg-white/10 text-white rounded">Modo Espejo (Mirror)</span>
+        </div>
+      </div>
+      <button id="btnDismissModal" class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-colors">
+        Entendido
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: FULLSCREEN SCRIPT EDITOR ================= -->
+  <div id="fullEditorModal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 sm:p-6 hidden">
+    <div class="bg-[#0b0f19] border border-white/15 rounded-2xl max-w-3xl w-full h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="p-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+        <div class="flex items-center gap-2">
+          <i data-lucide="file-edit" class="w-5 h-5 text-indigo-400"></i>
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider">Editor Completo de Guion</h3>
+        </div>
+        <button id="btnCloseFullEditor" class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="p-4 flex-1 flex flex-col min-h-0 bg-[#07090e]">
+        <textarea id="modalScriptTextarea" class="w-full h-full p-4 bg-transparent text-slate-100 text-base leading-relaxed focus:outline-none resize-none font-sans" placeholder="Pega aquí tu guion extenso..."></textarea>
+      </div>
+      <div class="p-3.5 border-t border-white/10 bg-white/[0.02] flex items-center justify-between">
+        <span class="text-xs text-slate-500 font-mono-code" id="modalWordCount">0 palabras</span>
+        <button id="btnApplyFullEditor" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30">
+          Aplicar al Teleprompter
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= NOTIFICATION TOAST ================= -->
+  <div id="toastNotification" class="fixed bottom-20 right-6 max-w-sm bg-slate-900 border border-indigo-500/30 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 transform translate-y-24 opacity-0 transition-all duration-300 z-50">
+    <div id="toastIconContainer" class="p-1 rounded-lg bg-indigo-500/20 text-indigo-400">
+      <i data-lucide="info" class="w-4 h-4"></i>
+    </div>
+    <div class="flex-1 text-xs">
+      <p id="toastMessage" class="font-medium">Mensaje informativo</p>
+    </div>
+  </div>
+
+  <!-- ================= JAVASCRIPT LOGIC ================= -->
+  <script>
+    /* Initialize Lucide Icons */
+    lucide.createIcons();
+
+    /* ========================================================
+       STATE VARIABLES & REFS
+       ======================================================== */
+    const STATE = {
+      isRecording: false,
+      isPaused: false,
+      isPlayingScroll: false,
+      audioFormat: 'mp3', // 'mp3' | 'wav'
+      speedWPM: 140,
+      fontSize: 44,
+      isMirrored: false,
+      showGuide: true,
+      startTime: 0,
+      elapsedRecordedMs: 0,
+      timerInterval: null,
+      scrollAnimFrameId: null,
+      lastFrameTime: 0,
+      currentScrollSubPixel: 0,
+      audioStream: null,
+      audioContext: null,
+      scriptProcessor: null,
+      audioInputNode: null,
+      processedOutputNode: null,
+      highPassFilter: null,
+      presenceFilter: null,
+      compressorNode: null,
+      gainNode: null,
+      acFilterEnabled: true,
+      micGainValue: 1.2,
+      recordingSampleRate: 44100,
+      wavBuffers: [],
+      mp3Encoder: null,
+      mp3Chunks: [],
+      analyser: null,
+      micDataArray: null,
+      vuAnimId: null,
+      targetDirectoryHandle: null, // Guardado con File System Access API
+      scriptText: ""
+    };
+
+    // DOM Elements
+    const elements = {
+      prompterContainer: document.getElementById('prompterContainer'),
+      prompterContent: document.getElementById('prompterContent'),
+      scriptInput: document.getElementById('scriptInput'),
+      btnFormatMp3: document.getElementById('btnFormatMp3'),
+      btnFormatWav: document.getElementById('btnFormatWav'),
+      btnToggleAcFilter: document.getElementById('btnToggleAcFilter'),
+      sliderMicGain: document.getElementById('sliderMicGain'),
+      micGainDisplay: document.getElementById('micGainDisplay'),
+      fileScriptInput: document.getElementById('fileScriptInput'),
+      btnPasteClipboard: document.getElementById('btnPasteClipboard'),
+      btnOpenBigEditor: document.getElementById('btnOpenBigEditor'),
+      fullEditorModal: document.getElementById('fullEditorModal'),
+      modalScriptTextarea: document.getElementById('modalScriptTextarea'),
+      modalWordCount: document.getElementById('modalWordCount'),
+      btnCloseFullEditor: document.getElementById('btnCloseFullEditor'),
+      btnApplyFullEditor: document.getElementById('btnApplyFullEditor'),
+      inputProjectTitle: document.getElementById('inputProjectTitle'),
+      headerProjectName: document.getElementById('headerProjectName'),
+      statWordCount: document.getElementById('statWordCount'),
+      statEstTime: document.getElementById('statEstTime'),
+      btnMasterAction: document.getElementById('btnMasterAction'),
+      btnMasterText: document.getElementById('btnMasterText'),
+      btnPause: document.getElementById('btnPause'),
+      btnStopRecord: document.getElementById('btnStopRecord'),
+      btnResetPosition: document.getElementById('btnResetPosition'),
+      sliderSpeed: document.getElementById('sliderSpeed'),
+      wpmDisplay: document.getElementById('wpmDisplay'),
+      sliderFontSize: document.getElementById('sliderFontSize'),
+      fontSizeDisplay: document.getElementById('fontSizeDisplay'),
+      btnMirror: document.getElementById('btnMirror'),
+      btnToggleGuide: document.getElementById('btnToggleGuide'),
+      readingGuideBar: document.getElementById('readingGuideBar'),
+      btnSelectFolder: document.getElementById('btnSelectFolder'),
+      btnSelectFolderText: document.getElementById('btnSelectFolderText'),
+      folderBadge: document.getElementById('folderBadge'),
+      editorPanel: document.getElementById('editorPanel'),
+      btnToggleDrawer: document.getElementById('btnToggleDrawer'),
+      btnClosePanel: document.getElementById('btnClosePanel'),
+      btnClearScript: document.getElementById('btnClearScript'),
+      btnLoadSample: document.getElementById('btnLoadSample'),
+      recordingTimer: document.getElementById('recordingTimer'),
+      recBadgeDot: document.getElementById('recBadgeDot'),
+      micStatusDot: document.getElementById('micStatusDot'),
+      micStatusText: document.getElementById('micStatusText'),
+      vuMeterCanvas: document.getElementById('vuMeterCanvas'),
+      countdownOverlay: document.getElementById('countdownOverlay'),
+      countdownNumber: document.getElementById('countdownNumber'),
+      btnShortcuts: document.getElementById('btnShortcuts'),
+      shortcutsModal: document.getElementById('shortcutsModal'),
+      btnCloseModal: document.getElementById('btnCloseModal'),
+      btnDismissModal: document.getElementById('btnDismissModal'),
+      toastNotification: document.getElementById('toastNotification'),
+      toastMessage: document.getElementById('toastMessage')
+    };
+
+    /* ========================================================
+       SAMPLE SCRIPT & CONTENT ENGINE
+       ======================================================== */
+    const SAMPLE_SCRIPT = `Bienvenidos a este nuevo episodio. Hoy vamos a explorar cómo la *disciplina* y la *consistencia* pueden transformar por completo tu flujo creativo. //
+
+A menudo pensamos que la inspiración llega por arte de magia. Esperamos sentados a que las ideas caigan del cielo antes de sentarnos a grabar o escribir. [pausa] Pero la realidad de los grandes creadores es *muy diferente*.
+
+La inspiración no es un chispazo fortuito; es el resultado inevitable de *estar trabajando* en el momento oportuno. Cuando te sientas ante el micrófono, cada palabra debe articularse con *intención*, con *claridad* y con *pasión*. //
+
+Fíjate en tu respiración. Relaja los hombros. No hay prisa alguna por llegar al final. El ritmo lo marcas tú, y cada pausa tiene *tanto valor* como las palabras que pronuncias.
+
+Recuerda que este teleprompter está diseñado para que mantengas la mirada directa hacia tu audiencia. [pausa] Al hablar con convicción, generas esa cercanía que conecta con las personas del otro lado. //
+
+Finalizamos esta primera reflexión: *crea tus rutinas*, cuida tus palabras y no pares de crear valor. Nos vemos en la próxima entrega.`;
+
+    /* ========================================================
+       HELPER: TOAST MESSAGES
+       ======================================================== */
+    function showToast(msg, duration = 3500) {
+      elements.toastMessage.textContent = msg;
+      elements.toastNotification.classList.remove('translate-y-24', 'opacity-0');
+      elements.toastNotification.classList.add('translate-y-0', 'opacity-100');
+      setTimeout(() => {
+        elements.toastNotification.classList.remove('translate-y-0', 'opacity-100');
+        elements.toastNotification.classList.add('translate-y-24', 'opacity-0');
+      }, duration);
+    }
+
+    /* ========================================================
+       SCRIPT PARSING & RENDERING
+       ======================================================== */
+    function updatePrompterContent() {
+      const text = elements.scriptInput.value.trim();
+      STATE.scriptText = text;
+
+      // Stats calculation (excluyendo marcadores // y [pausa])
+      const cleanForCount = text.replace(/\/\/|\[pausa\]/gi, ' ').replace(/\*/g, '');
+      const words = cleanForCount ? cleanForCount.split(/\s+/).filter(Boolean).length : 0;
+      elements.statWordCount.textContent = words.toLocaleString();
+
+      const estMinutes = (words / STATE.speedWPM).toFixed(1);
+      elements.statEstTime.textContent = `${estMinutes} min`;
+
+      if (!text) {
+        elements.prompterContent.innerHTML = `
+          <div class="text-center py-20 text-slate-500 font-mono">
+            <i data-lucide="align-left" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+            <p>Escribe o pega tu guion en el panel izquierdo para comenzar.</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      // Format paragraphs into prompter cards with breathing & emphasis cues
+      const paragraphs = text.split(/\n+/).filter(p => p.trim().length > 0);
+      elements.prompterContent.innerHTML = paragraphs.map((para) => {
+        let formattedHtml = escapeHtml(para);
+
+        // Resaltar *énfasis vocal* en color cian luminoso
+        formattedHtml = formattedHtml.replace(/\*([^*]+)\*/g, '<span class="text-cyan-300 underline decoration-cyan-500/50 decoration-2 underline-offset-4">$1</span>');
+
+        // Reemplazar // o [pausa] por un indicador visual de respiración
+        formattedHtml = formattedHtml.replace(/(\/\/|\[pausa\])/gi, '<span class="inline-flex items-center gap-1.5 mx-2 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs sm:text-sm font-mono-code align-middle tracking-wider uppercase"><span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>PAUSA · RESPIRA</span>');
+
+        return `
+          <p class="prompter-paragraph text-slate-200 transition-colors duration-200 hover:text-white" style="font-size: ${STATE.fontSize}px; line-height: 1.5;">
+            ${formattedHtml}
+          </p>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, function(m) {
+        return {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#039;'
+        }[m];
+      });
+    }
+
+    /* ========================================================
+       FILE SYSTEM ACCESS API (Auto folder & direct write)
+       ======================================================== */
+    async function selectTargetDirectory() {
+      if (!('showDirectoryPicker' in window)) {
+        showToast("Tu navegador no soporta File System Access API. Se descargará de forma convencional.");
+        return;
+      }
+      try {
+        const dirHandle = await window.showDirectoryPicker({
+          id: 'vocalprompter-recordings',
+          mode: 'readwrite'
+        });
+        STATE.targetDirectoryHandle = dirHandle;
+        elements.folderBadge.textContent = "Carpeta Vinculada";
+        elements.folderBadge.className = "text-[10px] text-emerald-400 font-mono font-bold";
+        elements.btnSelectFolderText.textContent = `Guardando en: ${dirHandle.name}`;
+        elements.btnSelectFolder.className = "w-full py-2 px-3 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-lg flex items-center justify-center gap-2";
+        showToast(`Carpeta raíz vinculada: "${dirHandle.name}". Se generará una subcarpeta por toma.`);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error("Error al seleccionar carpeta:", err);
+          showToast("No se pudo obtener acceso a la carpeta.");
+        }
+      }
+    }
+
+    /* Guardar toma: Audio + Guion de respaldo */
+    async function saveTakeFiles(audioBlob, projectTitle, timestamp) {
+      const sanitizedTitle = projectTitle.replace(/[^a-z0-9_-]/gi, '_').toLowerCase() || 'toma';
+      const ext = STATE.audioFormat;
+      const folderName = `${sanitizedTitle}_${timestamp}`;
+      const audioFileName = `${sanitizedTitle}_${timestamp}.${ext}`;
+      const scriptFileName = `${sanitizedTitle}_guion.txt`;
+
+      // Estrategia 1: Guardado en subcarpeta nativa si hay File System Handle
+      if (STATE.targetDirectoryHandle) {
+        try {
+          // Crear subcarpeta de la toma
+          const subDirHandle = await STATE.targetDirectoryHandle.getDirectoryHandle(folderName, { create: true });
+          
+          // Escribir archivo de audio
+          const audioFileHandle = await subDirHandle.getFileHandle(audioFileName, { create: true });
+          const audioWritable = await audioFileHandle.createWritable();
+          // Escribir archivo de texto del guion (limpio de etiquetas técnicas)
+          const cleanScriptText = (STATE.scriptText || "Sin guion registrado")
+            .replace(/\/\/|\[pausa\]/gi, '\n')
+            .replace(/\*/g, '');
+          const textFileHandle = await subDirHandle.getFileHandle(scriptFileName, { create: true });
+          const textWritable = await textFileHandle.createWritable();
+          await textWritable.write(cleanScriptText);
+          await textWritable.close();
+
+          showToast(`¡Toma guardada en la carpeta: /${folderName}!`);
+          return;
+        } catch (err) {
+          console.error("Error escribiendo en File System:", err);
+          showToast("Error en escritura local. Descargando como archivo.");
+        }
+      }
+
+      // Estrategia 2: Descarga de archivo Blob nativo convencional
+      const url = URL.createObjectURL(audioBlob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = audioFileName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 2000);
+      showToast(`Descargando audio: ${audioFileName}`);
+    }
+
+    /* ========================================================
+       MICROPHONE & AUDIO STUDIO DSP ENGINE
+       ======================================================== */
+    async function initAudioEngine() {
+      if (STATE.audioStream) return true;
+      try {
+        // Desactivamos noiseSuppression agresivo del navegador para evitar voz metálica;
+        // usamos nuestra cadena DSP de estudio (HighPass 90Hz + EQ + Compresor).
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1
+          }
+        });
+
+        STATE.audioStream = stream;
+
+        // Usar sampleRate nativo del hardware para evitar desajustes de velocidad
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        STATE.audioContext = new AudioCtx();
+        STATE.recordingSampleRate = STATE.audioContext.sampleRate;
+
+        const source = STATE.audioContext.createMediaStreamSource(stream);
+        STATE.audioInputNode = source;
+
+        // 1. Filtro Pasa-Altos (90 Hz) -> Corta zumbido grave del aire acondicionado
+        STATE.highPassFilter = STATE.audioContext.createBiquadFilter();
+        STATE.highPassFilter.type = 'highpass';
+        STATE.highPassFilter.frequency.value = STATE.acFilterEnabled ? 90 : 20;
+        STATE.highPassFilter.Q.value = 0.7;
+
+        // 2. Filtro de Presencia Vocal (+2.5 dB a 3 kHz) -> Claridad de locución
+        STATE.presenceFilter = STATE.audioContext.createBiquadFilter();
+        STATE.presenceFilter.type = 'peaking';
+        STATE.presenceFilter.frequency.value = 3000;
+        STATE.presenceFilter.gain.value = 2.5;
+        STATE.presenceFilter.Q.value = 1.0;
+
+        // 3. Compresor Dinámico -> Nivela picos y pasajes suaves
+        STATE.compressorNode = STATE.audioContext.createDynamicsCompressor();
+        STATE.compressorNode.threshold.value = -24;
+        STATE.compressorNode.knee.value = 12;
+        STATE.compressorNode.ratio.value = 4;
+        STATE.compressorNode.attack.value = 0.005;
+        STATE.compressorNode.release.value = 0.15;
+
+        // 4. Control de Ganancia (Volumen de salida limpio)
+        STATE.gainNode = STATE.audioContext.createGain();
+        STATE.gainNode.gain.value = STATE.micGainValue;
+
+        // 5. Analizador para Vúmetro LED en vivo
+        STATE.analyser = STATE.audioContext.createAnalyser();
+        STATE.analyser.fftSize = 256;
+        STATE.analyser.smoothingTimeConstant = 0.75;
+
+        // Conectar toda la cadena DSP en serie:
+        // Mic -> HighPass (90Hz) -> EQ Presencia -> Compresor -> Ganancia -> Analyser
+        source
+          .connect(STATE.highPassFilter)
+          .connect(STATE.presenceFilter)
+          .connect(STATE.compressorNode)
+          .connect(STATE.gainNode)
+          .connect(STATE.analyser);
+
+        // Nodo final limpio que alimentará el exportador WAV/MP3
+        STATE.processedOutputNode = STATE.gainNode;
+
+        STATE.micDataArray = new Uint8Array(STATE.analyser.frequencyBinCount);
+        renderVuMeter();
+
+        elements.micStatusDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+        elements.micStatusText.textContent = "Estudio DSP Activo";
+        return true;
+      } catch (err) {
+        console.error("Error al acceder al micrófono:", err);
+        showToast("Error: no se pudo obtener acceso al micrófono.");
+        return false;
+      }
+    }
+
+    /* Vúmetro LED en vivo (Verde / Amarillo / Rojo) */
+    function renderVuMeter() {
+      const canvas = elements.vuMeterCanvas;
+      if (!canvas || !STATE.analyser) return;
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+
+      const draw = () => {
+        STATE.vuAnimId = requestAnimationFrame(draw);
+        STATE.analyser.getByteTimeDomainData(STATE.micDataArray);
+
+        // Calcular nivel RMS real de la señal ya procesada
+        let sumSquares = 0;
+        for (let i = 0; i < STATE.micDataArray.length; i++) {
+          const normalized = (STATE.micDataArray[i] - 128) / 128;
+          sumSquares += normalized * normalized;
+        }
+        const rms = Math.sqrt(sumSquares / STATE.micDataArray.length);
+        const level = Math.min(1, rms * 4.5); // Escala visual sensible para voz
+
+        ctx.clearRect(0, 0, width, height);
+
+        // Dibujar 12 segmentos LED
+        const segments = 12;
+        const gap = 1.5;
+        const segWidth = (width - gap * (segments - 1)) / segments;
+        const activeSegments = Math.round(level * segments);
+
+        for (let i = 0; i < segments; i++) {
+          const x = i * (segWidth + gap);
+          if (i < activeSegments) {
+            if (i < 8) ctx.fillStyle = '#10b981';      // Verde óptimo
+            else if (i < 10) ctx.fillStyle = '#f59e0b'; // Amarillo alto
+            else ctx.fillStyle = '#f43f5e';             // Rojo pico
+          } else {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+          }
+          ctx.fillRect(x, 1, segWidth, height - 2);
+        }
+      };
+
+      if (STATE.vuAnimId) cancelAnimationFrame(STATE.vuAnimId);
+      draw();
+    }
+
+    /* Iniciar grabación PCM en tiempo real desde la cadena DSP limpia (WAV / MP3) */
+    function startAudioCapture() {
+      if (STATE.audioContext.state === 'suspended') {
+        STATE.audioContext.resume();
+      }
+
+      STATE.wavBuffers = [];
+      STATE.mp3Chunks = [];
+
+      if (STATE.audioFormat === 'mp3') {
+        if (typeof lamejs === 'undefined') {
+          showToast("Librería MP3 no cargada, cambiando a WAV automáticamente.");
+          setAudioFormat('wav');
+        } else {
+          // 1 canal (mono), sampleRate nativo del hardware, 192 kbps
+          STATE.mp3Encoder = new lamejs.Mp3Encoder(1, STATE.recordingSampleRate, 192);
+        }
+      }
+
+      // Buffer size de 4096 muestras para estabilidad en sesiones de 20+ minutos
+      const bufferSize = 4096;
+      STATE.scriptProcessor = STATE.audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+      STATE.scriptProcessor.onaudioprocess = (e) => {
+        if (!STATE.isRecording || STATE.isPaused) return;
+
+        const inputFloat32 = e.inputBuffer.getChannelData(0);
+
+        if (STATE.audioFormat === 'wav') {
+          // Clonar buffer Float32 para ensamblaje WAV al finalizar
+          STATE.wavBuffers.push(new Float32Array(inputFloat32));
+        } else if (STATE.audioFormat === 'mp3' && STATE.mp3Encoder) {
+          // Convertir Float32 a Int16 PCM y codificar bloque a bloque en tiempo real
+          const samplesInt16 = floatTo16BitPCM(inputFloat32);
+          const mp3buf = STATE.mp3Encoder.encodeBuffer(samplesInt16);
+          if (mp3buf.length > 0) {
+            STATE.mp3Chunks.push(new Int8Array(mp3buf));
+          }
+        }
+      };
+
+      // Conectar la salida procesada (con filtro aire + EQ + compresor + ganancia) al grabador
+      STATE.processedOutputNode.connect(STATE.scriptProcessor);
+      STATE.scriptProcessor.connect(STATE.audioContext.destination);
+      STATE.isRecording = true;
+    }
+
+    function floatTo16BitPCM(float32Array) {
+      const len = float32Array.length;
+      const int16 = new Int16Array(len);
+      for (let i = 0; i < len; i++) {
+        let s = Math.max(-1, Math.min(1, float32Array[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      return int16;
+    }
+
+    function encodeWAV(buffers, sampleRate) {
+      let totalLength = 0;
+      for (let i = 0; i < buffers.length; i++) {
+        totalLength += buffers[i].length;
+      }
+
+      const buffer = new ArrayBuffer(44 + totalLength * 2);
+      const view = new DataView(buffer);
+
+      const writeString = (offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      };
+
+      /* Cabecera RIFF WAVE estándar */
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + totalLength * 2, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true); // Subchunk1Size (16 para PCM)
+      view.setUint16(20, 1, true);  // AudioFormat (1 = PCM lineal)
+      view.setUint16(22, 1, true);  // NumChannels (1 = Mono)
+      view.setUint32(24, sampleRate, true); // SampleRate
+      view.setUint32(28, sampleRate * 2, true); // ByteRate
+      view.setUint16(32, 2, true);  // BlockAlign
+      view.setUint16(34, 16, true); // BitsPerSample
+      writeString(36, 'data');
+      view.setUint32(40, totalLength * 2, true);
+
+      // Escribir muestras PCM 16-bit
+      let offset = 44;
+      for (let i = 0; i < buffers.length; i++) {
+        const chunk = buffers[i];
+        for (let j = 0; j < chunk.length; j++, offset += 2) {
+          let s = Math.max(-1, Math.min(1, chunk[j]));
+          view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+      }
+
+      return new Blob([view], { type: 'audio/wav' });
+    }
+
+    /* Detener captura y generar Blob WAV o MP3 */
+    function stopAudioCapture() {
+      return new Promise((resolve) => {
+        if (STATE.scriptProcessor) {
+          try {
+            STATE.processedOutputNode.disconnect(STATE.scriptProcessor);
+            STATE.scriptProcessor.disconnect();
+          } catch (e) {}
+          STATE.scriptProcessor = null;
+        }
+
+        if (STATE.audioFormat === 'wav') {
+          if (STATE.wavBuffers.length === 0) {
+            resolve(null);
+            return;
+          }
+          const wavBlob = encodeWAV(STATE.wavBuffers, STATE.recordingSampleRate);
+          STATE.wavBuffers = [];
+          resolve(wavBlob);
+        } else {
+          if (!STATE.mp3Encoder) {
+            resolve(null);
+            return;
+          }
+          const endBuf = STATE.mp3Encoder.flush();
+          if (endBuf.length > 0) {
+            STATE.mp3Chunks.push(new Int8Array(endBuf));
+          }
+          const mp3Blob = new Blob(STATE.mp3Chunks, { type: 'audio/mp3' });
+          STATE.mp3Chunks = [];
+          STATE.mp3Encoder = null;
+          resolve(mp3Blob);
+        }
+      });
+    }
+
+    function setAudioFormat(fmt) {
+      if (STATE.isRecording) {
+        showToast("No puedes cambiar el formato mientras grabas.");
+        return;
+      }
+      STATE.audioFormat = fmt;
+      if (fmt === 'mp3') {
+        elements.btnFormatMp3.className = "py-1.5 px-2 rounded-md font-bold bg-indigo-600 text-white shadow transition-all flex flex-col items-center";
+        elements.btnFormatWav.className = "py-1.5 px-2 rounded-md font-medium text-slate-400 hover:text-white transition-all flex flex-col items-center";
+      } else {
+        elements.btnFormatWav.className = "py-1.5 px-2 rounded-md font-bold bg-indigo-600 text-white shadow transition-all flex flex-col items-center";
+        elements.btnFormatMp3.className = "py-1.5 px-2 rounded-md font-medium text-slate-400 hover:text-white transition-all flex flex-col items-center";
+      }
+    }
+
+    /* ========================================================
+       SMOOTH SCROLL ENGINE (requestAnimationFrame)
+       ======================================================== */
+    function calculatePixelsPerSecond() {
+      // 1 palabra ~ 5 caracteres. 
+      // Calculamos el desplazamiento vertical por segundo a partir del WPM
+      // Basado en el alto de línea promedio renderizado
+      const p = elements.prompterContent.querySelector('.prompter-paragraph');
+      const lineHeight = p ? p.offsetHeight / Math.max(1, p.innerText.length / 55) : (STATE.fontSize * 1.5);
+      // Aproximación estándar de lectura fluida
+      const pxPerMinute = STATE.speedWPM * (STATE.fontSize * 0.44);
+      return pxPerMinute / 60;
+    }
+
+    function scrollStep(now) {
+      if (!STATE.isPlayingScroll) return;
+
+      if (!STATE.lastFrameTime) STATE.lastFrameTime = now;
+      const deltaSec = (now - STATE.lastFrameTime) / 1000;
+      STATE.lastFrameTime = now;
+
+      // Calcular avance en sub-píxeles para cero jitter
+      const pxPerSec = calculatePixelsPerSecond();
+      STATE.currentScrollSubPixel += pxPerSec * deltaSec;
+
+      const container = elements.prompterContainer;
+      container.scrollTop = STATE.currentScrollSubPixel;
+
+      // Detectar fin del texto
+      const maxScroll = container.scrollHeight - container.clientHeight;
+      if (container.scrollTop >= maxScroll) {
+        pausePrompterSession();
+        showToast("Llegaste al final del guion.");
+        return;
+      }
+
+      STATE.scrollAnimFrameId = requestAnimationFrame(scrollStep);
+    }
+
+    function startScrollLoop() {
+      STATE.isPlayingScroll = true;
+      STATE.lastFrameTime = performance.now();
+      STATE.currentScrollSubPixel = elements.prompterContainer.scrollTop;
+      STATE.scrollAnimFrameId = requestAnimationFrame(scrollStep);
+    }
+
+    function stopScrollLoop() {
+      STATE.isPlayingScroll = false;
+      if (STATE.scrollAnimFrameId) {
+        cancelAnimationFrame(STATE.scrollAnimFrameId);
+        STATE.scrollAnimFrameId = null;
+      }
+    }
+
+    /* ========================================================
+       SESSION CONTROLLER (Master Flow)
+       ======================================================== */
+    async function startCountDownAndRun() {
+      const hasMic = await initAudioEngine();
+      if (!hasMic) return;
+
+      if (!STATE.scriptText.trim()) {
+        showToast("Por favor ingresa o carga un guion primero.");
+        return;
+      }
+
+      // Cerrar panel de edición si está en pantallas pequeñas
+      if (window.innerWidth < 1024) {
+        elements.editorPanel.classList.add('-translate-x-full');
+      }
+
+      // Animación de cuenta regresiva 3, 2, 1
+      elements.countdownOverlay.classList.remove('hidden');
+      let count = 3;
+      elements.countdownNumber.textContent = count;
+
+      const countInterval = setInterval(() => {
+        count--;
+        if (count > 0) {
+          elements.countdownNumber.textContent = count;
+        } else {
+          clearInterval(countInterval);
+          elements.countdownOverlay.classList.add('hidden');
+          executeRunSession();
+        }
+      }, 1000);
+    }
+
+    function executeRunSession() {
+      startAudioCapture();
+      startScrollLoop();
+
+      // Iniciar Timer
+      STATE.startTime = Date.now() - STATE.elapsedRecordedMs;
+      STATE.timerInterval = setInterval(updateTimerDisplay, 250);
+
+      // Actualizar UI
+      STATE.isPaused = false;
+      elements.btnMasterAction.classList.add('hidden');
+      elements.btnPause.disabled = false;
+      elements.btnPause.classList.remove('text-slate-500', 'border-white/5', 'cursor-not-allowed');
+      elements.btnPause.classList.add('bg-white/10', 'text-white', 'hover:bg-white/20');
+      elements.btnStopRecord.disabled = false;
+
+      elements.recBadgeDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500 recording-ring";
+      showToast("¡Grabando y teleprompter en marcha!");
+    }
+
+    function pausePrompterSession() {
+      if (!STATE.isRecording) return;
+      STATE.isPaused = !STATE.isPaused;
+
+      if (STATE.isPaused) {
+        // Pausar
+        stopScrollLoop();
+        clearInterval(STATE.timerInterval);
+        elements.btnPause.innerHTML = `<i data-lucide="play" class="w-4 h-4 text-emerald-400"></i>`;
+        elements.recBadgeDot.className = "w-2.5 h-2.5 rounded-full bg-amber-400";
+        showToast("Pausado.");
+      } else {
+        // Reanudar
+        startScrollLoop();
+        STATE.startTime = Date.now() - STATE.elapsedRecordedMs;
+        STATE.timerInterval = setInterval(updateTimerDisplay, 250);
+        elements.btnPause.innerHTML = `<i data-lucide="pause" class="w-4 h-4"></i>`;
+        elements.recBadgeDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500 recording-ring";
+        showToast("Reanudado.");
+      }
+      lucide.createIcons();
+    }
+
+    async function finishAndExportSession() {
+      stopScrollLoop();
+      clearInterval(STATE.timerInterval);
+
+      // Obtener el audio final
+      const audioBlob = await stopAudioCapture();
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const projectTitle = elements.inputProjectTitle.value.trim() || 'toma';
+
+      if (audioBlob && audioBlob.size > 0) {
+        await saveTakeFiles(audioBlob, projectTitle, timestamp);
+      } else {
+        showToast("No se detectaron datos de audio grabados.");
+      }
+
+      // Reset Estado
+      STATE.isRecording = false;
+      STATE.isPaused = false;
+      STATE.elapsedRecordedMs = 0;
+      elements.recordingTimer.textContent = "00:00:00";
+      elements.recBadgeDot.className = "w-2.5 h-2.5 rounded-full bg-slate-600";
+
+      // Reset Botones UI
+      elements.btnMasterAction.classList.remove('hidden');
+      elements.btnPause.disabled = true;
+      elements.btnPause.innerHTML = `<i data-lucide="pause" class="w-4 h-4"></i>`;
+      elements.btnPause.className = "p-3 rounded-full bg-white/5 text-slate-500 border border-white/5 cursor-not-allowed transition-colors";
+      elements.btnStopRecord.disabled = true;
+      lucide.createIcons();
+    }
+
+    function resetPrompterToTop() {
+      stopScrollLoop();
+      STATE.currentScrollSubPixel = 0;
+      elements.prompterContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      if (STATE.isRecording && STATE.isPaused) {
+        // mantener pausado en el inicio
+      }
+    }
+
+    function updateTimerDisplay() {
+      STATE.elapsedRecordedMs = Date.now() - STATE.startTime;
+      const totalSec = Math.floor(STATE.elapsedRecordedMs / 1000);
+      const hrs = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+      const secs = String(totalSec % 60).padStart(2, '0');
+      elements.recordingTimer.textContent = `${hrs}:${mins}:${secs}`;
+    }
+
+    /* ========================================================
+       EVENT LISTENERS & BINDINGS
+       ======================================================== */
+    // Input del guion
+    elements.scriptInput.addEventListener('input', updatePrompterContent);
+
+    // Selector formato MP3 / WAV
+    elements.btnFormatMp3.addEventListener('click', () => setAudioFormat('mp3'));
+    elements.btnFormatWav.addEventListener('click', () => setAudioFormat('wav'));
+
+    // Toggle Filtro Aire Acondicionado (90Hz High-Pass)
+    elements.btnToggleAcFilter.addEventListener('click', () => {
+      STATE.acFilterEnabled = !STATE.acFilterEnabled;
+      if (STATE.highPassFilter && STATE.audioContext) {
+        STATE.highPassFilter.frequency.setTargetAtTime(
+          STATE.acFilterEnabled ? 90 : 20,
+          STATE.audioContext.currentTime,
+          0.05
+        );
+      }
+      if (STATE.acFilterEnabled) {
+        elements.btnToggleAcFilter.className = "hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-mono-code hover:bg-emerald-500/25 transition-all";
+        elements.btnToggleAcFilter.innerHTML = `<i data-lucide="wind" class="w-3.5 h-3.5"></i><span>Filtro Aire 90Hz: ON</span>`;
+        showToast("Filtro Pasa-Altos (90Hz) activado: ruido grave reducido.");
+      } else {
+        elements.btnToggleAcFilter.className = "hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 text-slate-400 border border-white/10 text-[11px] font-mono-code hover:bg-white/10 transition-all";
+        elements.btnToggleAcFilter.innerHTML = `<i data-lucide="wind" class="w-3.5 h-3.5"></i><span>Filtro Aire 90Hz: OFF</span>`;
+        showToast("Filtro Pasa-Altos desactivado (rango completo).");
+      }
+      lucide.createIcons();
+    });
+
+    // Control de Ganancia DSP en tiempo real
+    elements.sliderMicGain.addEventListener('input', (e) => {
+      STATE.micGainValue = parseFloat(e.target.value);
+      elements.micGainDisplay.textContent = `${STATE.micGainValue.toFixed(1)}x`;
+      if (STATE.gainNode && STATE.audioContext) {
+        STATE.gainNode.gain.setTargetAtTime(STATE.micGainValue, STATE.audioContext.currentTime, 0.05);
+      }
+    });
+
+    // Título del proyecto
+    elements.inputProjectTitle.addEventListener('input', (e) => {
+      elements.headerProjectName.textContent = e.target.value || 'proyecto-sin-titulo';
+    });
+
+    // Botón Master
+    elements.btnMasterAction.addEventListener('click', startCountDownAndRun);
+    elements.btnPause.addEventListener('click', pausePrompterSession);
+    elements.btnStopRecord.addEventListener('click', finishAndExportSession);
+    elements.btnResetPosition.addEventListener('click', resetPrompterToTop);
+
+    // Velocidad WPM
+    elements.sliderSpeed.addEventListener('input', (e) => {
+      STATE.speedWPM = parseInt(e.target.value, 10);
+      elements.wpmDisplay.textContent = `${STATE.speedWPM} WPM`;
+      // Recalcular duración estimada
+      const words = parseInt(elements.statWordCount.textContent.replace(/,/g, ''), 10) || 0;
+      elements.statEstTime.textContent = `${(words / STATE.speedWPM).toFixed(1)} min`;
+    });
+
+    // Tamaño de fuente
+    elements.sliderFontSize.addEventListener('input', (e) => {
+      STATE.fontSize = parseInt(e.target.value, 10);
+      elements.fontSizeDisplay.textContent = `${STATE.fontSize}px`;
+      const paragraphs = document.querySelectorAll('.prompter-paragraph');
+      paragraphs.forEach(p => p.style.fontSize = `${STATE.fontSize}px`);
+    });
+
+    // Modo Espejo (Mirror para cristal reflector de teleprompter físico)
+    elements.btnMirror.addEventListener('click', () => {
+      STATE.isMirrored = !STATE.isMirrored;
+      elements.prompterContainer.style.transform = STATE.isMirrored ? 'scaleX(-1)' : 'none';
+      elements.btnMirror.classList.toggle('text-indigo-400', STATE.isMirrored);
+      showToast(STATE.isMirrored ? "Modo Espejo Activado" : "Modo Normal");
+    });
+
+    // Toggle Línea de Mirada
+    elements.btnToggleGuide.addEventListener('click', () => {
+      STATE.showGuide = !STATE.showGuide;
+      elements.readingGuideBar.style.display = STATE.showGuide ? 'flex' : 'none';
+      elements.btnToggleGuide.classList.toggle('text-indigo-400', STATE.showGuide);
+    });
+
+    // Cargar archivo .txt / .md local
+    elements.fileScriptInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        elements.scriptInput.value = evt.target.result;
+        updatePrompterContent();
+        showToast(`Archivo "${file.name}" cargado exitosamente.`);
+      };
+      reader.readAsText(file);
+    });
+
+    // Pegar directo desde portapapeles
+    elements.btnPasteClipboard.addEventListener('click', async () => {
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            elements.scriptInput.value = text;
+            updatePrompterContent();
+            showToast("Texto pegado desde el portapapeles.");
+            return;
+          }
+        }
+      } catch (err) {
+        // Fallback: enfocar para que el usuario use Ctrl+V
+      }
+      elements.scriptInput.focus();
+      elements.scriptInput.select();
+      showToast("Presiona Ctrl+V (o Cmd+V) para pegar el texto.");
+    });
+
+    // Modal de Edición a Pantalla Completa
+    elements.btnOpenBigEditor.addEventListener('click', () => {
+      elements.modalScriptTextarea.value = elements.scriptInput.value;
+      const words = elements.scriptInput.value.trim() ? elements.scriptInput.value.trim().split(/\s+/).filter(Boolean).length : 0;
+      elements.modalWordCount.textContent = `${words} palabras`;
+      elements.fullEditorModal.classList.remove('hidden');
+      elements.modalScriptTextarea.focus();
+    });
+
+    elements.modalScriptTextarea.addEventListener('input', (e) => {
+      const words = e.target.value.trim() ? e.target.value.trim().split(/\s+/).filter(Boolean).length : 0;
+      elements.modalWordCount.textContent = `${words} palabras`;
+    });
+
+    elements.btnCloseFullEditor.addEventListener('click', () => {
+      elements.fullEditorModal.classList.add('hidden');
+    });
+
+    elements.btnApplyFullEditor.addEventListener('click', () => {
+      elements.scriptInput.value = elements.modalScriptTextarea.value;
+      updatePrompterContent();
+      elements.fullEditorModal.classList.add('hidden');
+      showToast("Guion actualizado en el teleprompter.");
+    });
+
+    // Selector de carpeta con File System API
+    elements.btnSelectFolder.addEventListener('click', selectTargetDirectory);
+
+    // Botones de Guion Muestra y Limpieza
+    elements.btnLoadSample.addEventListener('click', () => {
+      elements.scriptInput.value = SAMPLE_SCRIPT;
+      updatePrompterContent();
+      showToast("Guion de demostración cargado.");
+    });
+
+    elements.btnClearScript.addEventListener('click', () => {
+      elements.scriptInput.value = "";
+      updatePrompterContent();
+    });
+
+    // Drawer / Panel lateral
+    elements.btnToggleDrawer.addEventListener('click', () => {
+      elements.editorPanel.classList.toggle('-translate-x-full');
+    });
+    elements.btnClosePanel.addEventListener('click', () => {
+      elements.editorPanel.classList.add('-translate-x-full');
+    });
+
+    // Modal de Atajos
+    elements.btnShortcuts.addEventListener('click', () => {
+      elements.shortcutsModal.classList.remove('hidden');
+    });
+    elements.btnCloseModal.addEventListener('click', () => {
+      elements.shortcutsModal.classList.add('hidden');
+    });
+    elements.btnDismissModal.addEventListener('click', () => {
+      elements.shortcutsModal.classList.add('hidden');
+    });
+
+    // Permitir scroll manual en el teleprompter sin desincronizar el motor
+    elements.prompterContainer.addEventListener('wheel', () => {
+      if (STATE.isPlayingScroll) {
+        STATE.currentScrollSubPixel = elements.prompterContainer.scrollTop;
+      }
+    }, { passive: true });
+
+    elements.prompterContainer.addEventListener('touchmove', () => {
+      if (STATE.isPlayingScroll) {
+        STATE.currentScrollSubPixel = elements.prompterContainer.scrollTop;
+      }
+    }, { passive: true });
+
+    // ATAJOS GLOBALES DE TECLADO
+    window.addEventListener('keydown', (e) => {
+      // Ignorar si el usuario está escribiendo en el textarea o inputs
+      const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+      if (activeTag === 'textarea' || activeTag === 'input') return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (!STATE.isRecording) {
+          startCountDownAndRun();
+        } else {
+          pausePrompterSession();
+        }
+      } else if (e.code === 'ArrowUp') {
+        e.preventDefault();
+        STATE.speedWPM = Math.min(280, STATE.speedWPM + 5);
+        elements.sliderSpeed.value = STATE.speedWPM;
+        elements.wpmDisplay.textContent = `${STATE.speedWPM} WPM`;
+      } else if (e.code === 'ArrowDown') {
+        e.preventDefault();
+        STATE.speedWPM = Math.max(60, STATE.speedWPM - 5);
+        elements.sliderSpeed.value = STATE.speedWPM;
+        elements.wpmDisplay.textContent = `${STATE.speedWPM} WPM`;
+      } else if (e.key === 'r' || e.key === 'R') {
+        resetPrompterToTop();
+      } else if (e.key === 'm' || e.key === 'M') {
+        elements.btnMirror.click();
+      }
+    });
+
+    /* Inicialización con guion precargado */
+    window.addEventListener('DOMContentLoaded', () => {
+      elements.scriptInput.value = SAMPLE_SCRIPT;
+      updatePrompterContent();
+    });
+  </script>
+</body>
+</html>
